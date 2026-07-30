@@ -3,7 +3,7 @@
 # Модуль подгружается из распакованного архива репозитория; get.ps1 вызывает
 # Show-EwMenu и передаёт путь к этой распаковке.
 
-$script:EwVersion = '1.1.0'
+$script:EwVersion = '1.2.0'
 
 $script:EwRoot       = Join-Path $env:LOCALAPPDATA 'EwScripts'
 $script:EwRuntimeDir = Join-Path $script:EwRoot 'runtime'

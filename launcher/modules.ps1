@@ -261,6 +261,31 @@ function Copy-EwModuleFiles {
     }
 }
 
+# Модуль может иметь побочные эффекты за пределами своей папки — например,
+# записаться в контекстное меню. Лаунчер про них ничего не знает: он лишь зовёт
+# точку входа модуля с оговорёнными в манифесте аргументами.
+function Invoke-EwModuleHook {
+    param(
+        [Parameter(Mandatory)] $Manifest,
+        [Parameter(Mandatory)][string]$Dest,
+        $HookArgs,
+        [string]$Title = 'Настраиваю модуль.'
+    )
+
+    $data = Join-Path $script:EwDataDir $Manifest.id
+    $prepared = @(@($HookArgs) | Where-Object { $_ } | ForEach-Object {
+        ([string]$_).Replace('{data}', $data)
+    })
+    if (-not $prepared.Count) { return }
+
+    Write-EwStep $Title
+    New-Item -ItemType Directory -Path $data -Force | Out-Null
+    & $script:EwPyExe (Join-Path $script:EwRuntimeDir 'launch.py') $Dest $Manifest.entry $prepared
+    if ($LASTEXITCODE -ne 0) {
+        throw "модуль не смог выполнить $($prepared -join ' ')"
+    }
+}
+
 function Install-EwModule {
     param(
         [Parameter(Mandatory)] $Manifest,
@@ -321,14 +346,27 @@ function Install-EwModule {
         throw
     }
 
-    if ($hadPrevious) {
-        Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
     New-Item -ItemType Directory -Path (Join-Path $script:EwDataDir $Manifest.id) -Force | Out-Null
 
     New-EwLaunchCmd -Manifest $Manifest -Dest $dest
     New-EwShortcut -Manifest $Manifest -Dest $dest
+
+    # Хук выполняется до того, как выброшена резервная копия. Если модуль не смог
+    # себя настроить, возвращаем прежнюю версию целиком: половинчатая установка
+    # хуже отказа, потому что выглядит рабочей.
+    if ($Manifest.postInstall) {
+        try {
+            Invoke-EwModuleHook -Manifest $Manifest -Dest $dest -HookArgs $Manifest.postInstall
+        } catch {
+            Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+            if ($hadPrevious) { Move-Item -LiteralPath $backup -Destination $dest -Force }
+            throw
+        }
+    }
+
+    if ($hadPrevious) {
+        Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     Set-EwStateModule -State $State -Id $Manifest.id -Version $Manifest.version `
                       -RuntimeVersion $RuntimeSpec.version
@@ -341,9 +379,24 @@ function Remove-EwModule {
     $dest = Join-Path $script:EwModulesDir $Id
 
     $shortcut = $null
+    $installed = $null
     $manifestPath = Join-Path $dest 'module.json'
     if (Test-Path -LiteralPath $manifestPath) {
-        try { $shortcut = (Read-EwManifest -Path $manifestPath).shortcut } catch { }
+        try {
+            $installed = Read-EwManifest -Path $manifestPath
+            $shortcut = $installed.shortcut
+        } catch { }
+    }
+
+    # Модуль убирает за собой сам, пока его файлы ещё на месте. Ошибка здесь не
+    # должна мешать удалению: иначе сломанный модуль стало бы невозможно снести.
+    if ($installed -and $installed.preUninstall) {
+        try {
+            Invoke-EwModuleHook -Manifest $installed -Dest $dest `
+                                -HookArgs $installed.preUninstall -Title 'Убираю следы модуля.'
+        } catch {
+            Write-EwWarn "Модуль не смог убрать за собой: $($_.Exception.Message)"
+        }
     }
 
     # Папку сначала отодвигаем — по той же причине, что и при обновлении: на
