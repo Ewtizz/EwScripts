@@ -59,6 +59,16 @@ function Invoke-EwBootstrap {
     $previousEncoding = [Console]::OutputEncoding
     try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
 
+    # A session closed with the window X never reaches the cleanup below, so old
+    # working folders pile up over time. Sweep the stale ones; the age filter is
+    # what keeps a concurrently running instance safe.
+    try {
+        $cutoff = (Get-Date).AddDays(-1)
+        Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter 'ewscripts-*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.CreationTime -lt $cutoff } |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    } catch { }
+
     $work = Join-Path $env:TEMP ('ewscripts-' + [Guid]::NewGuid().ToString('N'))
     try {
         New-Item -ItemType Directory -Path $work -Force | Out-Null
