@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "netpulse",
   "name": "NetPulse",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "summary": "Монитор трафика Wi-Fi с веб-дашбордом",
   "runtime": "python",
   "entry": "run.py",
