@@ -3,7 +3,7 @@
 # Модуль подгружается из распакованного архива репозитория; get.ps1 вызывает
 # Show-EwMenu и передаёт путь к этой распаковке.
 
-$script:EwVersion = '1.0.0'
+$script:EwVersion = '1.1.0'
 
 $script:EwRoot       = Join-Path $env:LOCALAPPDATA 'EwScripts'
 $script:EwRuntimeDir = Join-Path $script:EwRoot 'runtime'
@@ -132,8 +132,10 @@ function Show-EwModuleMenu {
                 Write-EwOk "$($Manifest.name) запущен в отдельном окне."
             }
             elseif ($choice -eq '2' -and $installed -ne $Manifest.version) {
-                Install-EwModule -Manifest $Manifest -RuntimeSpec $RuntimeSpec -State $state
-                Write-EwOk "Обновлён до $($Manifest.version). Данные не тронуты."
+                if (Confirm-EwModuleStopped -Id $Manifest.id -Name $Manifest.name) {
+                    Install-EwModule -Manifest $Manifest -RuntimeSpec $RuntimeSpec -State $state
+                    Write-EwOk "Обновлён до $($Manifest.version). Данные не тронуты."
+                }
             }
             elseif ($choice -eq '3') {
                 $data = Join-Path $script:EwDataDir $Manifest.id
@@ -143,12 +145,14 @@ function Show-EwModuleMenu {
             }
             elseif ($choice -eq '4') {
                 if (Read-EwConfirm "Удалить $($Manifest.name)?") {
-                    $withData = Read-EwConfirm 'Удалить также его данные и логи?'
-                    Remove-EwModule -Id $Manifest.id -State $state -WithData:$withData
-                    Write-Host ''
-                    Write-EwOk "$($Manifest.name) удалён."
-                    if (-not $withData) {
-                        Write-EwInfo "Данные остались в $(Join-Path $script:EwDataDir $Manifest.id)"
+                    if (Confirm-EwModuleStopped -Id $Manifest.id -Name $Manifest.name -Action 'Удаление') {
+                        $withData = Read-EwConfirm 'Удалить также его данные и логи?'
+                        Remove-EwModule -Id $Manifest.id -State $state -WithData:$withData
+                        Write-Host ''
+                        Write-EwOk "$($Manifest.name) удалён."
+                        if (-not $withData) {
+                            Write-EwInfo "Данные остались в $(Join-Path $script:EwDataDir $Manifest.id)"
+                        }
                     }
                 } else { $pause = $false }
             }
@@ -169,8 +173,10 @@ function Invoke-EwUpdateAll {
         $state = Get-EwState
         Write-EwStep "$($m.name) → $($m.version)"
         try {
-            Install-EwModule -Manifest $m -RuntimeSpec $RuntimeSpec -State $state
-            Write-EwOk "$($m.name) обновлён."
+            if (Confirm-EwModuleStopped -Id $m.id -Name $m.name) {
+                Install-EwModule -Manifest $m -RuntimeSpec $RuntimeSpec -State $state
+                Write-EwOk "$($m.name) обновлён."
+            }
         } catch {
             Write-EwErr "$($m.name): $($_.Exception.Message)"
         }
@@ -193,6 +199,13 @@ function Invoke-EwRemoveAll {
     if (-not (Read-EwConfirm 'Удалить EwScripts полностью?')) { return $false }
     $withData = Read-EwConfirm 'Удалить также данные и логи модулей?'
     Write-Host ''
+
+    # Запущенный модуль держит свою папку: без этой проверки удаление снесло бы
+    # часть файлов и упало на середине.
+    $state = Get-EwState
+    foreach ($id in @($state.modules.PSObject.Properties.Name)) {
+        if (-not (Confirm-EwModuleStopped -Id $id -Name $id -Action 'Удаление')) { return $false }
+    }
 
     try {
         if (Test-Path -LiteralPath $script:EwStartMenu) {

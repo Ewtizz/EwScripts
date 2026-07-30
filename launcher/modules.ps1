@@ -164,6 +164,61 @@ function Remove-EwShortcut {
     if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
 }
 
+# Работающий модуль держит свою папку: cmd.exe не отпускает launch.cmd, а
+# python.exe — рабочую директорию. Найти его можно по пути в командной строке,
+# он уникален.
+function Get-EwModuleProcess {
+    param([Parameter(Mandatory)][string]$Id)
+
+    $needle = Join-Path $script:EwModulesDir $Id
+    try {
+        $all = Get-CimInstance Win32_Process `
+            -Filter "Name = 'python.exe' OR Name = 'pythonw.exe' OR Name = 'cmd.exe'" `
+            -ErrorAction Stop
+    } catch {
+        return @()
+    }
+    return @($all | Where-Object {
+        $_.CommandLine -and $_.CommandLine.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+}
+
+function Stop-EwModuleProcess {
+    param([Parameter(Mandatory)][string]$Id)
+
+    foreach ($p in (Get-EwModuleProcess -Id $Id)) {
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    # Папку Windows отпускает не в тот же миг, когда процесс умирает.
+    for ($i = 0; $i -lt 25; $i++) {
+        if (-not @(Get-EwModuleProcess -Id $Id).Count) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+    return $false
+}
+
+function Confirm-EwModuleStopped {
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$Action = 'Обновление'
+    )
+
+    if (-not @(Get-EwModuleProcess -Id $Id).Count) { return $true }
+
+    Write-EwWarn "«$Name» сейчас запущен. $Action заменит его файлы."
+    if (-not (Read-EwConfirm 'Закрыть его и продолжить?')) {
+        Write-EwInfo 'Отменено, ничего не изменилось.'
+        return $false
+    }
+    if (-not (Stop-EwModuleProcess -Id $Id)) {
+        Write-EwErr 'Не удалось закрыть. Закройте окно модуля вручную и повторите.'
+        return $false
+    }
+    Write-EwStep 'Запущенный модуль закрыт.'
+    return $true
+}
+
 # Копируется только код модуля. Всё, что модуль наживает при работе — логи,
 # данные, libs, кэш Python, — в установку попадать не должно: иначе машина
 # разработчика протащит свой мусор в чужую установку, а libs приедет устаревшим.
@@ -238,8 +293,37 @@ function Install-EwModule {
     }
 
     # Подмена целиком: код заменяется, папка data остаётся нетронутой.
-    if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
-    Move-Item -LiteralPath $stage -Destination $dest
+    #
+    # Старую версию сначала отодвигаем, а не удаляем. Remove-Item -Recurse сносит
+    # сначала содержимое и только потом саму папку: на занятой папке он успевал
+    # стереть код и падал уже на ней, оставляя модуль выпотрошенным — и его
+    # приходилось ставить заново. Переименование либо проходит целиком, либо не
+    # делает ничего, поэтому рабочая установка не может пострадать.
+    $backup = "$dest.old"
+    if (Test-Path -LiteralPath $backup) {
+        Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $hadPrevious = Test-Path -LiteralPath $dest
+    if ($hadPrevious) {
+        try {
+            Move-Item -LiteralPath $dest -Destination $backup -ErrorAction Stop
+        } catch {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+            throw "файлы модуля заняты — закройте запущенный «$($Manifest.name)» и повторите"
+        }
+    }
+
+    try {
+        Move-Item -LiteralPath $stage -Destination $dest -ErrorAction Stop
+    } catch {
+        if ($hadPrevious) { Move-Item -LiteralPath $backup -Destination $dest -Force }
+        throw
+    }
+
+    if ($hadPrevious) {
+        Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     New-Item -ItemType Directory -Path (Join-Path $script:EwDataDir $Manifest.id) -Force | Out-Null
 
@@ -261,9 +345,25 @@ function Remove-EwModule {
     if (Test-Path -LiteralPath $manifestPath) {
         try { $shortcut = (Read-EwManifest -Path $manifestPath).shortcut } catch { }
     }
-    Remove-EwShortcut -Name $shortcut
 
-    if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+    # Папку сначала отодвигаем — по той же причине, что и при обновлении: на
+    # занятой папке Remove-Item -Recurse стирает содержимое и падает. И только
+    # когда это удалось, трогаем ярлык и состояние: иначе неудачное удаление
+    # оставило бы модуль без ярлыка, но с файлами.
+    if (Test-Path -LiteralPath $dest) {
+        $trash = "$dest.old"
+        if (Test-Path -LiteralPath $trash) {
+            Remove-Item -LiteralPath $trash -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        try {
+            Move-Item -LiteralPath $dest -Destination $trash -ErrorAction Stop
+        } catch {
+            throw "файлы модуля заняты — закройте запущенный модуль и повторите"
+        }
+        Remove-Item -LiteralPath $trash -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Remove-EwShortcut -Name $shortcut
 
     if ($WithData) {
         $data = Join-Path $script:EwDataDir $Id
@@ -277,7 +377,11 @@ function Remove-EwModule {
 function Start-EwModule {
     param([Parameter(Mandatory)][string]$Id)
 
-    $cmd = Join-Path (Join-Path $script:EwModulesDir $Id) 'launch.cmd'
+    $dir = Join-Path $script:EwModulesDir $Id
+    $cmd = Join-Path $dir 'launch.cmd'
     if (-not (Test-Path -LiteralPath $cmd)) { throw "модуль «$Id» не установлен" }
-    Start-Process -FilePath $cmd
+    # Рабочая директория та же, что ставит ярлык: запуск из меню и из Пуска
+    # должны вести себя одинаково, иначе модуль ведёт себя по-разному в
+    # зависимости от того, как его открыли.
+    Start-Process -FilePath $cmd -WorkingDirectory $dir
 }
