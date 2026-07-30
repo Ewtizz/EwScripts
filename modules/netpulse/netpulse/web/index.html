@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetPulse — монитор трафика</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 12h4l3-8 4 16 3-8h6"/>
+        </svg>
+      </span>
+      <span class="brand__text">
+        <b>NetPulse</b>
+        <small>монитор трафика</small>
+      </span>
+    </div>
+
+    <div class="topbar__controls">
+      <label class="field">
+        <span class="field__label">Адаптер</span>
+        <select id="adapterSelect" class="select"></select>
+      </label>
+
+      <label class="field field--narrow">
+        <span class="field__label">Интервал</span>
+        <select id="intervalSelect" class="select">
+          <option value="0.5">0,5 с</option>
+          <option value="1" selected>1 с</option>
+          <option value="2">2 с</option>
+          <option value="5">5 с</option>
+        </select>
+      </label>
+
+      <div class="topbar__actions">
+        <span id="statusPill" class="pill pill--live">
+          <span class="pill__dot"></span><span id="statusText">подключение…</span>
+        </span>
+        <button id="unitsBtn" class="btn" title="Переключить байты / биты">Б/с</button>
+        <button id="pauseBtn" class="btn" title="Пауза отображения (пробел)">Пауза</button>
+        <button id="resetBtn" class="btn" title="Обнулить статистику сессии">Сброс</button>
+        <button id="themeBtn" class="btn btn--icon" title="Светлая / тёмная тема">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <section class="hero">
+      <article class="tile tile--rx">
+        <header class="tile__head">
+          <span class="tile__icon">↓</span>
+          <span class="tile__title">Приём</span>
+          <span class="tile__badge" id="rxPeak">пик —</span>
+        </header>
+        <div class="tile__value">
+          <span id="rxRate" class="num">0</span><span id="rxUnit" class="unit">Б/с</span>
+        </div>
+        <div class="tile__sub"><span id="rxBits">0 бит/с</span> · за сессию <b id="rxTotal">0 Б</b></div>
+        <canvas class="tile__spark" id="rxSpark"></canvas>
+      </article>
+
+      <article class="tile tile--tx">
+        <header class="tile__head">
+          <span class="tile__icon">↑</span>
+          <span class="tile__title">Передача</span>
+          <span class="tile__badge" id="txPeak">пик —</span>
+        </header>
+        <div class="tile__value">
+          <span id="txRate" class="num">0</span><span id="txUnit" class="unit">Б/с</span>
+        </div>
+        <div class="tile__sub"><span id="txBits">0 бит/с</span> · за сессию <b id="txTotal">0 Б</b></div>
+        <canvas class="tile__spark" id="txSpark"></canvas>
+      </article>
+
+      <article class="tile tile--wifi">
+        <header class="tile__head">
+          <span class="tile__title" id="ssid">нет сети</span>
+          <span class="tile__badge" id="wifiState">—</span>
+        </header>
+        <div class="wifi__signal">
+          <div class="bars" id="signalBars">
+            <i></i><i></i><i></i><i></i>
+          </div>
+          <div class="wifi__numbers">
+            <span id="signalPct" class="num num--sm">—</span><span class="unit">%</span>
+            <span id="rssi" class="wifi__rssi">— dBm</span>
+          </div>
+        </div>
+        <div class="tile__sub" id="wifiMeta">канал — · — · —</div>
+      </article>
+    </section>
+
+    <section class="card chart-card">
+      <header class="card__head">
+        <h2 class="card__title">Трафик в реальном времени</h2>
+        <div class="legend">
+          <span class="legend__item"><i class="swatch swatch--rx"></i>приём</span>
+          <span class="legend__item"><i class="swatch swatch--tx"></i>передача</span>
+        </div>
+        <div class="segmented" id="rangeButtons">
+          <button data-range="60" class="is-active">1 мин</button>
+          <button data-range="300">5 мин</button>
+          <button data-range="900">15 мин</button>
+          <button data-range="3600">1 час</button>
+        </div>
+      </header>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+        <div class="tooltip" id="tooltip" hidden></div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><span class="stat__label">Принято за сессию</span><b class="stat__value" id="sRx">0 Б</b></div>
+      <div class="stat"><span class="stat__label">Отправлено за сессию</span><b class="stat__value" id="sTx">0 Б</b></div>
+      <div class="stat"><span class="stat__label">Всего за сессию</span><b class="stat__value" id="sTotal">0 Б</b></div>
+      <div class="stat"><span class="stat__label">Длительность</span><b class="stat__value" id="sUptime">00:00:00</b></div>
+      <div class="stat"><span class="stat__label">Средняя скорость ↓</span><b class="stat__value" id="sAvgRx">0 Б/с</b></div>
+      <div class="stat"><span class="stat__label">Средняя скорость ↑</span><b class="stat__value" id="sAvgTx">0 Б/с</b></div>
+      <div class="stat"><span class="stat__label">Пакетов ↓ / ↑</span><b class="stat__value" id="sPackets">0 / 0</b></div>
+      <div class="stat"><span class="stat__label">Ошибок / отброшено</span><b class="stat__value" id="sErrors">0 / 0</b></div>
+    </section>
+
+    <section class="columns">
+      <article class="card">
+        <header class="card__head"><h2 class="card__title">Адаптер и подключение</h2></header>
+        <dl class="details" id="details"></dl>
+      </article>
+
+      <article class="card">
+        <header class="card__head">
+          <h2 class="card__title">Активные соединения</h2>
+          <span class="card__hint" id="connHint">по процессам</span>
+        </header>
+        <div class="conn" id="connections">
+          <p class="empty">Загрузка…</p>
+        </div>
+      </article>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span id="footerLeft">—</span>
+    <span id="footerRight"></span>
+  </footer>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
