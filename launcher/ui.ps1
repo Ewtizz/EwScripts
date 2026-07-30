@@ -36,7 +36,10 @@ function Write-EwModule {
     Write-Host $left -ForegroundColor White -NoNewline
     Write-Host ((' ' * [Math]::Max(1, $gap)) + $Status) -ForegroundColor $StatusColor
     if ($Summary) {
-        # ровно под названием: отступ + пробел + [K] + два пробела
+        # Ровно под названием: отступ + пробел + [K] + два пробела. Длинное
+        # описание обрезаем, иначе оно вылезет за рамку и сломает вёрстку.
+        $room = $script:EwWidth - 6
+        if ($Summary.Length -gt $room) { $Summary = $Summary.Substring(0, $room - 1) + '…' }
         Write-Host "$script:EwPad      $Summary" -ForegroundColor DarkGray
     }
     Write-Host ''
@@ -49,6 +52,24 @@ function Write-EwAction {
 }
 
 function Write-EwInfo { param([string]$Text) Write-Host "$script:EwPad $Text" -ForegroundColor Gray }
+
+# Длинная заметка модуля: переносим по словам, чтобы не расползалась за край окна.
+function Write-EwNote {
+    param([string]$Text, [ConsoleColor]$Color = 'Yellow')
+
+    if (-not $Text) { return }
+    $limit = $script:EwWidth - 3
+    $line = ''
+    foreach ($word in ($Text -split '\s+')) {
+        if ($line -and ($line.Length + 1 + $word.Length) -gt $limit) {
+            Write-Host "$script:EwPad $line" -ForegroundColor $Color
+            $line = $word
+        } else {
+            $line = if ($line) { "$line $word" } else { $word }
+        }
+    }
+    if ($line) { Write-Host "$script:EwPad $line" -ForegroundColor $Color }
+}
 function Write-EwStep { param([string]$Text) Write-Host "$script:EwPad ·  $Text" -ForegroundColor DarkCyan }
 function Write-EwOk   { param([string]$Text) Write-Host "$script:EwPad ✓  $Text" -ForegroundColor Green }
 function Write-EwWarn { param([string]$Text) Write-Host "$script:EwPad !  $Text" -ForegroundColor Yellow }

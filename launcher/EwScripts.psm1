@@ -97,6 +97,10 @@ function Show-EwModuleMenu {
         Write-EwHeader -Version "v$script:EwVersion"
         Write-Host "$script:EwPad $($Manifest.name)" -ForegroundColor White
         if ($Manifest.summary) { Write-EwInfo $Manifest.summary }
+        if ($Manifest.note) {
+            Write-Host ''
+            Write-EwNote $Manifest.note
+        }
         Write-Host ''
 
         # Список действий собирается заранее и нумеруется подряд. Раньше номера
@@ -147,6 +151,12 @@ function Show-EwModuleMenu {
                 if ($Manifest.shortcut) {
                     Write-EwInfo "Ярлык: Пуск → EwScripts → $($Manifest.shortcut)"
                 }
+                # Заметку показываем именно здесь: человек только что поставил
+                # модуль и сейчас пойдёт его искать.
+                if ($Manifest.note) {
+                    Write-Host ''
+                    Write-EwNote $Manifest.note
+                }
             }
             elseif ($todo -eq 'run') {
                 Start-EwModule -Id $Manifest.id
@@ -196,6 +206,7 @@ function Invoke-EwInstallAll {
             # его изменила, и работать со старым снимком нельзя.
             Install-EwModule -Manifest $m -RuntimeSpec $RuntimeSpec -State (Get-EwState)
             Write-EwOk "$($m.name) установлен."
+            if ($m.note) { Write-EwNote $m.note }
         } catch {
             Write-EwErr "$($m.name): $($_.Exception.Message)"
         }
