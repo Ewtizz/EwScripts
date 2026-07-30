@@ -54,10 +54,61 @@ function Write-EwOk   { param([string]$Text) Write-Host "$script:EwPad ✓  $Tex
 function Write-EwWarn { param([string]$Text) Write-Host "$script:EwPad !  $Text" -ForegroundColor Yellow }
 function Write-EwErr  { param([string]$Text) Write-Host "$script:EwPad ✗  $Text" -ForegroundColor Red }
 
+# Меню читает одну клавишу, без Enter: это установщик, а не форма ввода.
+#
+# ReadKey недоступен в неинтерактивном хосте — например, при прогоне тестов или
+# запуске из конвейера, — поэтому там мягко откатываемся на построчный ввод,
+# вместо того чтобы падать.
+function Read-EwKey {
+    # Проверку перенаправления делаем ДО вызова ReadKey, а не ловим исключение
+    # после: при перенаправлённом вводе консольного буфера клавиш нет, и ReadKey
+    # не падает, а виснет навсегда. Ловить тут нечего — надо просто не звать.
+    #
+    # На «irm ... | iex» это не влияет: там конвейер объектов PowerShell, а не
+    # стандартный ввод процесса, консоль остаётся на месте.
+    $redirected = $false
+    try { $redirected = [Console]::IsInputRedirected } catch { }
+
+    if (-not $redirected) {
+        while ($true) {
+            $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+            # Shift, Ctrl, Alt, CapsLock и Win сами по себе выбором не являются
+            if ($key.VirtualKeyCode -notin 16, 17, 18, 20, 91, 92) { break }
+        }
+        return [pscustomobject]@{
+            Char     = [string]$key.Character
+            IsEnter  = ($key.VirtualKeyCode -eq 13)
+            IsEscape = ($key.VirtualKeyCode -eq 27)
+        }
+    }
+
+    try {
+        $line = (Read-Host).Trim()
+    } catch {
+        # Ввода нет вовсе: трактуем как выход, чтобы меню закрылось само,
+        # а не упало трейсбеком в лицо.
+        return [pscustomobject]@{ Char = '0'; IsEnter = $false; IsEscape = $true }
+    }
+    return [pscustomobject]@{
+        Char     = $line
+        IsEnter  = ($line -eq '')
+        IsEscape = $false
+    }
+}
+
 function Read-EwChoice {
+    # Пунктов больше девяти — одной клавишей уже не обойтись, читаем строкой.
+    param([switch]$AllowLongInput)
+
     Write-Host ''
     Write-Host "$script:EwPad Выбор: " -ForegroundColor Cyan -NoNewline
-    return (Read-Host).Trim()
+    if ($AllowLongInput) { return (Read-Host).Trim() }
+
+    $key = Read-EwKey
+    if ($key.IsEscape) { Write-Host '0' -ForegroundColor White; return '0' }
+    if ($key.IsEnter) { Write-Host ''; return '' }
+    Write-Host $key.Char -ForegroundColor White
+    return $key.Char
 }
 
 function Read-EwConfirm {
@@ -65,13 +116,18 @@ function Read-EwConfirm {
 
     Write-Host ''
     Write-Host "$script:EwPad $Question [д/н]: " -ForegroundColor Yellow -NoNewline
-    return ((Read-Host).Trim() -match '^(д|да|y|yes)$')
+    $key = Read-EwKey
+    # Согласие требует явной клавиши: Enter и Escape означают «нет», чтобы
+    # случайное нажатие никогда не запускало удаление.
+    $yes = (-not $key.IsEscape) -and (-not $key.IsEnter) -and ($key.Char -match '^(д|y|1)')
+    Write-Host $(if ($yes) { 'да' } else { 'нет' }) -ForegroundColor White
+    return $yes
 }
 
 function Wait-EwKey {
-    param([string]$Text = 'Нажмите Enter, чтобы вернуться в меню')
+    param([string]$Text = 'Нажмите любую клавишу, чтобы вернуться в меню')
 
     Write-Host ''
     Write-Host "$script:EwPad $Text" -ForegroundColor DarkGray
-    $null = Read-Host
+    $null = Read-EwKey
 }

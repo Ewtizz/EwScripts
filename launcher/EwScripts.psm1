@@ -3,7 +3,7 @@
 # Модуль подгружается из распакованного архива репозитория; get.ps1 вызывает
 # Show-EwMenu и передаёт путь к этой распаковке.
 
-$script:EwVersion = '1.2.0'
+$script:EwVersion = '1.3.0'
 
 $script:EwRoot       = Join-Path $env:LOCALAPPDATA 'EwScripts'
 $script:EwRuntimeDir = Join-Path $script:EwRoot 'runtime'
@@ -42,6 +42,7 @@ function Show-EwMenu {
         $byKey = @{}
         $index = 0
         $updatable = @()
+        $installable = @()
         foreach ($m in $available) {
             $index++
             $byKey["$index"] = $m
@@ -49,6 +50,7 @@ function Show-EwMenu {
 
             if (-not $installed) {
                 $status = 'не установлен'; $color = 'DarkGray'
+                $installable += $m
             } elseif ($installed -ne $m.version) {
                 # сравнение на неравенство, а не «больше»: откат тоже должен работать
                 $status = "обновление до $($m.version)"; $color = 'Yellow'
@@ -61,14 +63,20 @@ function Show-EwMenu {
         }
 
         Write-EwRule
+        if ($installable.Count) { Write-EwAction -Key 'A' -Text "Установить всё ($($installable.Count))" }
         if ($updatable.Count) { Write-EwAction -Key 'R' -Text "Обновить всё ($($updatable.Count))" }
         Write-EwAction -Key 'U' -Text 'Удалить EwScripts полностью'
         Write-EwAction -Key '0' -Text 'Выход'
 
-        $choice = Read-EwChoice
+        # Буквы совпадают с латинскими и русскими на тех же физических клавишах:
+        # раскладку ради меню переключать не придётся.
+        $choice = Read-EwChoice -AllowLongInput:($available.Count -gt 9)
         if ($choice -eq '0' -or $choice -eq '') { return }
         elseif ($choice -match '^[uUгГ]$') {
             if (Invoke-EwRemoveAll) { return }
+        }
+        elseif ($choice -match '^[aAфФ]$' -and $installable.Count) {
+            Invoke-EwInstallAll -Modules $installable -RuntimeSpec $runtimeSpec
         }
         elseif ($choice -match '^[rRкК]$' -and $updatable.Count) {
             Invoke-EwUpdateAll -Modules $updatable -RuntimeSpec $runtimeSpec
@@ -91,59 +99,72 @@ function Show-EwModuleMenu {
         if ($Manifest.summary) { Write-EwInfo $Manifest.summary }
         Write-Host ''
 
+        # Список действий собирается заранее и нумеруется подряд. Раньше номера
+        # были прибиты гвоздями, и при скрытом «Обновить» меню шло 1, 3, 4, 0.
+        $actions = @()
         if (-not $installed) {
             Write-EwInfo "Версия в репозитории: $($Manifest.version). Не установлен."
-            Write-Host ''
-            Write-EwRule
-            Write-EwAction -Key '1' -Text 'Установить'
+            $actions += [pscustomobject]@{ Do = 'install'; Text = 'Установить' }
         } else {
             Write-EwInfo "Установлена версия $installed, в репозитории $($Manifest.version)."
-            Write-Host ''
-            Write-EwRule
-            Write-EwAction -Key '1' -Text 'Запустить'
-            if ($installed -ne $Manifest.version) {
-                Write-EwAction -Key '2' -Text "Обновить до $($Manifest.version)"
+            # «Запустить» — только у модулей с ярлыком. Конвертер изображений
+            # живёт в контекстном меню, запускать его отдельно нечем.
+            if ($Manifest.shortcut) {
+                $actions += [pscustomobject]@{ Do = 'run'; Text = 'Запустить' }
             }
-            Write-EwAction -Key '3' -Text 'Открыть папку с данными'
-            Write-EwAction -Key '4' -Text 'Удалить'
+            if ($installed -ne $Manifest.version) {
+                $actions += [pscustomobject]@{ Do = 'update'; Text = "Обновить до $($Manifest.version)" }
+            }
+            $actions += [pscustomobject]@{ Do = 'data'; Text = 'Открыть папку с данными' }
+            $actions += [pscustomobject]@{ Do = 'remove'; Text = 'Удалить' }
+        }
+
+        Write-Host ''
+        Write-EwRule
+        $byKey = @{}
+        $number = 0
+        foreach ($action in $actions) {
+            $number++
+            $byKey["$number"] = $action.Do
+            Write-EwAction -Key "$number" -Text $action.Text
         }
         Write-EwAction -Key '0' -Text 'Назад'
 
         $choice = Read-EwChoice
         Write-Host ''
-
         if ($choice -eq '0' -or $choice -eq '') { return }
+
+        $todo = $byKey[$choice]
+        if (-not $todo) { continue }
 
         # Ветки на if/elseif, а не switch: «continue» внутри switch внутри цикла
         # в PowerShell трактуется неочевидно, и это тихо ломает поток управления.
         $pause = $true
         try {
-            if (-not $installed) {
-                if ($choice -eq '1') {
-                    Install-EwModule -Manifest $Manifest -RuntimeSpec $RuntimeSpec -State $state
-                    Write-EwOk "$($Manifest.name) установлен."
-                    if ($Manifest.shortcut) {
-                        Write-EwInfo "Ярлык: Пуск → EwScripts → $($Manifest.shortcut)"
-                    }
-                } else { $pause = $false }
+            if ($todo -eq 'install') {
+                Install-EwModule -Manifest $Manifest -RuntimeSpec $RuntimeSpec -State $state
+                Write-EwOk "$($Manifest.name) установлен."
+                if ($Manifest.shortcut) {
+                    Write-EwInfo "Ярлык: Пуск → EwScripts → $($Manifest.shortcut)"
+                }
             }
-            elseif ($choice -eq '1') {
+            elseif ($todo -eq 'run') {
                 Start-EwModule -Id $Manifest.id
                 Write-EwOk "$($Manifest.name) запущен в отдельном окне."
             }
-            elseif ($choice -eq '2' -and $installed -ne $Manifest.version) {
+            elseif ($todo -eq 'update') {
                 if (Confirm-EwModuleStopped -Id $Manifest.id -Name $Manifest.name) {
                     Install-EwModule -Manifest $Manifest -RuntimeSpec $RuntimeSpec -State $state
                     Write-EwOk "Обновлён до $($Manifest.version). Данные не тронуты."
                 }
             }
-            elseif ($choice -eq '3') {
+            elseif ($todo -eq 'data') {
                 $data = Join-Path $script:EwDataDir $Manifest.id
                 New-Item -ItemType Directory -Path $data -Force | Out-Null
                 Start-Process explorer.exe $data
                 $pause = $false
             }
-            elseif ($choice -eq '4') {
+            elseif ($todo -eq 'remove') {
                 if (Read-EwConfirm "Удалить $($Manifest.name)?") {
                     if (Confirm-EwModuleStopped -Id $Manifest.id -Name $Manifest.name -Action 'Удаление') {
                         $withData = Read-EwConfirm 'Удалить также его данные и логи?'
@@ -156,13 +177,30 @@ function Show-EwModuleMenu {
                     }
                 } else { $pause = $false }
             }
-            else { $pause = $false }
         } catch {
             Write-EwErr $_.Exception.Message
             $pause = $true
         }
         if ($pause) { Wait-EwKey }
     }
+}
+
+function Invoke-EwInstallAll {
+    param([Parameter(Mandatory)] $Modules, [Parameter(Mandatory)] $RuntimeSpec)
+
+    Write-EwHeader -Version "v$script:EwVersion"
+    foreach ($m in $Modules) {
+        Write-EwStep "$($m.name) $($m.version)"
+        try {
+            # Состояние перечитывается на каждом шаге: предыдущая установка уже
+            # его изменила, и работать со старым снимком нельзя.
+            Install-EwModule -Manifest $m -RuntimeSpec $RuntimeSpec -State (Get-EwState)
+            Write-EwOk "$($m.name) установлен."
+        } catch {
+            Write-EwErr "$($m.name): $($_.Exception.Message)"
+        }
+    }
+    Wait-EwKey
 }
 
 function Invoke-EwUpdateAll {
