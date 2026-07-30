@@ -26,6 +26,14 @@ class ConvertError(Exception):
     """
 
 
+class SkipFile(Exception):
+    """Не ошибка: делать было нечего.
+
+    Например, файл уже меньше запрошенного размера. Показывать это как сбой
+    неправильно — пользователь ничего не сделал не так.
+    """
+
+
 _OPERATIONS = {
     # ROTATE_90 у Pillow — против часовой стрелки, отсюда перекрёстные значения.
     "rotate-cw": Image.Transpose.ROTATE_270,
@@ -51,7 +59,7 @@ def unique_path(path: Path) -> Path:
     raise ConvertError("в папке слишком много файлов с таким именем")
 
 
-def _open(source: Path) -> tuple[Image.Image, str]:
+def open_image(source: Path) -> tuple[Image.Image, str]:
     """Открывает файл и возвращает его вместе с исходным форматом."""
     try:
         image = Image.open(source)
@@ -85,7 +93,7 @@ def _flatten(image: Image.Image, settings: dict) -> Image.Image:
     return canvas
 
 
-def _prepare(image: Image.Image, fmt: str, settings: dict) -> Image.Image:
+def prepare_for_format(image: Image.Image, fmt: str, settings: dict) -> Image.Image:
     if fmt in formats.BILEVEL:
         return image.convert("1")
 
@@ -104,7 +112,7 @@ def _prepare(image: Image.Image, fmt: str, settings: dict) -> Image.Image:
     return image
 
 
-def _save_options(image: Image.Image, fmt: str, settings: dict) -> dict:
+def save_options(image: Image.Image, fmt: str, settings: dict) -> dict:
     quality = settings.get("quality", {})
     options: dict = {}
 
@@ -134,8 +142,8 @@ def _save_options(image: Image.Image, fmt: str, settings: dict) -> dict:
 def _save_animation(
     image: Image.Image, destination: Path, fmt: str, settings: dict
 ) -> None:
-    frames = [_prepare(frame.copy(), fmt, settings) for frame in ImageSequence.Iterator(image)]
-    options = _save_options(frames[0], fmt, settings)
+    frames = [prepare_for_format(frame.copy(), fmt, settings) for frame in ImageSequence.Iterator(image)]
+    options = save_options(frames[0], fmt, settings)
     options["save_all"] = True
     options["append_images"] = frames[1:]
     if fmt in ("GIF", "WEBP", "PNG"):
@@ -153,15 +161,15 @@ def convert(source: Path, pillow_format: str, settings: dict) -> Path:
     if target is None:
         raise ConvertError(f"неизвестный формат {pillow_format}")
 
-    image, _ = _open(source)
+    image, _ = open_image(source)
     destination = unique_path(source.with_suffix("." + target.ext))
     try:
         animated = getattr(image, "n_frames", 1) > 1
         if animated and pillow_format in formats.ANIMATED:
             _save_animation(image, destination, pillow_format, settings)
         else:
-            prepared = _prepare(_normalize_orientation(image), pillow_format, settings)
-            options = _save_options(prepared, pillow_format, settings)
+            prepared = prepare_for_format(_normalize_orientation(image), pillow_format, settings)
+            options = save_options(prepared, pillow_format, settings)
             try:
                 prepared.save(destination, format=pillow_format, **options)
             except (OSError, ValueError) as exc:
@@ -180,7 +188,7 @@ def transform(source: Path, operation: str, settings: dict) -> Path:
     if operation not in _OPERATIONS:
         raise ConvertError(f"неизвестное действие {operation}")
 
-    image, fmt = _open(source)
+    image, fmt = open_image(source)
     if not fmt:
         image.close()
         raise ConvertError("не удалось определить формат файла")
@@ -188,7 +196,7 @@ def transform(source: Path, operation: str, settings: dict) -> Path:
     temporary = source.with_name(source.name + ".ewtmp")
     try:
         result = _normalize_orientation(image).transpose(_OPERATIONS[operation])
-        options = _save_options(result, fmt, settings)
+        options = save_options(result, fmt, settings)
         try:
             result.save(temporary, format=fmt, **options)
         except (OSError, ValueError) as exc:

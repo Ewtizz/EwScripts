@@ -38,6 +38,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="сконвертировать файлы в указанный формат")
     parser.add_argument("--transform", metavar="ДЕЙСТВИЕ",
                         help="повернуть или отразить файлы на месте")
+    parser.add_argument("--compress", metavar="УРОВЕНЬ",
+                        help="сжать: light, medium или strong")
+    parser.add_argument("--fit", metavar="БАЙТ", type=int,
+                        help="сжать так, чтобы уместиться в указанный размер")
     parser.add_argument("files", nargs="*", metavar="ФАЙЛ")
     return parser.parse_args(argv)
 
@@ -71,21 +75,24 @@ def run_batch(action, files: list[Path], settings: dict) -> int:
     обидно потерять двадцать девять из-за одного повреждённого.
     """
     from imgconv import ui
-    from imgconv.convert import ConvertError
+    from imgconv.convert import ConvertError, SkipFile
 
     failures: list[tuple[str, str]] = []
+    skipped: list[tuple[str, str]] = []
     succeeded = 0
 
     for path in files:
         try:
             action(path, settings)
             succeeded += 1
+        except SkipFile as exc:
+            skipped.append((path.name, str(exc)))
         except ConvertError as exc:
             failures.append((path.name, str(exc)))
         except Exception as exc:  # одно неожиданное не должно убить весь пакет
             failures.append((path.name, f"неожиданная ошибка: {exc}"))
 
-    ui.report_failures(failures, succeeded)
+    ui.report_result(failures, skipped, succeeded)
     return 0 if not failures else 1
 
 
@@ -100,11 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.register or args.unregister:
         return setup_registry(args.register, data_dir)
 
-    if not args.convert and not args.transform:
-        print("нужен --convert, --transform, --register или --unregister",
-              file=sys.stderr)
+    if not (args.convert or args.transform or args.compress or args.fit):
+        print("нужен --convert, --transform, --compress, --fit, --register "
+              "или --unregister", file=sys.stderr)
         return 2
 
+    from imgconv import compress as compress_mod
     from imgconv import convert as convert_mod
     from imgconv import formats, ui
     from imgconv import settings as settings_mod
@@ -124,7 +132,8 @@ def main(argv: list[str] | None = None) -> int:
 
         def action(path: Path, cfg: dict) -> None:
             convert_mod.convert(path, target, cfg)
-    else:
+
+    elif args.transform:
         operation = args.transform
         if operation not in formats.OPERATIONS:
             ui.message(f"Неизвестное действие: {operation}")
@@ -132,6 +141,24 @@ def main(argv: list[str] | None = None) -> int:
 
         def action(path: Path, cfg: dict) -> None:
             convert_mod.transform(path, operation, cfg)
+
+    elif args.compress:
+        level = args.compress
+        if level not in compress_mod.PRESETS:
+            ui.message(f"Неизвестный уровень сжатия: {level}")
+            return 2
+
+        def action(path: Path, cfg: dict) -> None:
+            compress_mod.compress_preset(path, level, cfg)
+
+    else:
+        limit = args.fit
+        if limit <= 0:
+            ui.message("Размер должен быть больше нуля.")
+            return 2
+
+        def action(path: Path, cfg: dict) -> None:
+            compress_mod.compress_to_size(path, limit, cfg)
 
     return run_batch(action, files, settings)
 

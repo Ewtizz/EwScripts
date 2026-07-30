@@ -66,6 +66,29 @@ ANIMATED = frozenset({"GIF", "WEBP", "PNG", "TIFF"})
 # Чёрно-белые форматы: всё остальное к ним не приводится напрямую.
 BILEVEL = frozenset({"XBM"})
 
+# Форматы без потерь. «Сжать, оставшись собой» у них не работает: PNG при
+# максимальном сжатии всё равно в 17 раз тяжелее того же кадра в JPEG и в 35 —
+# чем в WebP. Поэтому при сжатии они меняют формат.
+LOSSLESS_SOURCES = frozenset({
+    "PNG", "BMP", "DIB", "TIFF", "TGA", "PCX", "PPM", "SGI",
+    "QOI", "DDS", "ICNS", "ICO", "GIF", "PSD", "XBM", "XPM",
+})
+
+COMPRESS_FALLBACK = "WEBP"
+
+COMPRESSION_LEVELS = (
+    ("01_light", "Слегка", "light"),
+    ("02_medium", "Заметно", "medium"),
+    ("03_strong", "Сильно", "strong"),
+)
+
+COMPRESSION_TARGETS = (
+    ("11_500k", "Уместить в 500 КБ", 512_000),
+    ("12_1m", "Уместить в 1 МБ", 1_048_576),
+    ("13_2m", "Уместить в 2 МБ", 2_097_152),
+    ("14_5m", "Уместить в 5 МБ", 5_242_880),
+)
+
 ROTATIONS = (
     ("01_cw", "Вправо на 90°", "rotate-cw"),
     ("02_ccw", "Влево на 90°", "rotate-ccw"),

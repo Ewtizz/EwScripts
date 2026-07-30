@@ -24,20 +24,37 @@ def message(text: str, icon: int = MB_ICONERROR, title: str = TITLE) -> None:
         print(f"{title}: {text}")
 
 
-def report_failures(failures: list[tuple[str, str]], succeeded: int) -> None:
-    """Одно окно на всё выделение, а не по окну на каждый сбойный файл."""
-    if not failures:
+def _listing(title: str, items: list[tuple[str, str]]) -> list[str]:
+    lines = [title, ""]
+    for name, reason in items[:MAX_LISTED]:
+        lines.append(f"{name}\n    {reason}")
+    if len(items) > MAX_LISTED:
+        lines.append(f"…и ещё {len(items) - MAX_LISTED}")
+    return lines
+
+
+def report_result(
+    failures: list[tuple[str, str]],
+    skipped: list[tuple[str, str]],
+    succeeded: int,
+) -> None:
+    """Одно окно на всё выделение, а не по окну на каждый файл.
+
+    Пропуски и сбои разделены: файл, который уже меньше запрошенного размера,
+    не ошибка, и пугать пользователя красным крестом из-за него не за что.
+    """
+    if not failures and not skipped:
         return
 
-    lines = []
+    lines: list[str] = []
     if succeeded:
         lines.append(f"Обработано: {succeeded}")
-    lines.append(f"Не удалось: {len(failures)}")
-    lines.append("")
-    for name, reason in failures[:MAX_LISTED]:
-        lines.append(f"{name}\n    {reason}")
-    if len(failures) > MAX_LISTED:
-        lines.append(f"…и ещё {len(failures) - MAX_LISTED}")
+        lines.append("")
+    if failures:
+        lines += _listing(f"Не удалось: {len(failures)}", failures)
+    if skipped:
+        if failures:
+            lines.append("")
+        lines += _listing(f"Пропущено: {len(skipped)}", skipped)
 
-    icon = MB_ICONWARNING if succeeded else MB_ICONERROR
-    message("\n".join(lines), icon)
+    message("\n".join(lines), MB_ICONERROR if failures else MB_ICONWARNING)

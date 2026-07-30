@@ -29,6 +29,7 @@ ASSOCIATIONS = r"Software\Classes\SystemFileAssociations"
 
 VERBS = (
     ("EwImgConvert", "Конвертировать в", "Formats"),
+    ("EwImgCompress", "Сжать", "Compress"),
     ("EwImgRotate", "Повернуть", "Rotate"),
     ("EwImgMirror", "Отразить", "Mirror"),
 )
@@ -141,6 +142,18 @@ def register(data_dir: Path) -> None:
         base = rf"{MENU_ROOT}\More\shell\{target.key}"
         _set(base, {"MUIVerb": target.label})
         _set(rf"{base}\command", {"": command(f"--convert {target.pillow}")})
+
+    for key, label, level in formats.COMPRESSION_LEVELS:
+        base = rf"{MENU_ROOT}\Compress\shell\{key}"
+        _set(base, {"MUIVerb": label})
+        _set(rf"{base}\command", {"": command(f"--compress {level}")})
+
+    for index, (key, label, limit) in enumerate(formats.COMPRESSION_TARGETS):
+        base = rf"{MENU_ROOT}\Compress\shell\{key}"
+        # Черта отделяет «на глазок» от «под конкретный размер».
+        _set(base, {"MUIVerb": label},
+             {"CommandFlags": ECF_SEPARATORBEFORE} if index == 0 else None)
+        _set(rf"{base}\command", {"": command(f"--fit {limit}")})
 
     for tree, items in (("Rotate", formats.ROTATIONS), ("Mirror", formats.MIRRORS)):
         for key, label, operation in items:
