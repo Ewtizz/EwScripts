@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EwScripts</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b6b6b;
+    --card: #f5f5f4; --border: #e0e0de; --accent: #0078d4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --fg: #e8e8e6; --muted: #9a9a96;
+      --card: #1e1e23; --border: #2e2e34; --accent: #4cb2ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.25rem; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 42rem; margin: 0 auto; }
+  h1 { font-size: 2rem; margin: 0 0 .25rem; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0 0 2.5rem; }
+  h2 { font-size: 1rem; margin: 2.5rem 0 .75rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+  pre {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem; overflow-x: auto; margin: 0;
+    font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  ul { padding-left: 1.25rem; }
+  li { margin: .4rem 0; }
+  a { color: var(--accent); }
+  footer { margin-top: 3rem; color: var(--muted); font-size: .875rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>EwScripts</h1>
+  <p class="sub">Личные скрипты, которые ставятся одной командой. Windows 10 и 11.</p>
+
+  <h2>Установка</h2>
+  <pre>irm https://ewtizz.github.io/EwScripts/get.ps1 | iex</pre>
+
+  <h2>Что происходит</h2>
+  <ul>
+    <li>Откроется меню со списком модулей.</li>
+    <li>Всё ставится в <code>%LOCALAPPDATA%\EwScripts</code> — права администратора не нужны.</li>
+    <li>Python приносится свой, системный не трогается.</li>
+    <li>Пункт «Удалить EwScripts полностью» убирает всё за собой.</li>
+  </ul>
+
+  <h2>Модули</h2>
+  <ul>
+    <li><strong>NetPulse</strong> — монитор трафика Wi-Fi с веб-дашбордом, логами в CSV и разбором по процессам.</li>
+  </ul>
+
+  <footer>
+    Команда выше скачивает и выполняет код. Прежде чем запускать — его можно прочитать:
+    <a href="https://github.com/Ewtizz/EwScripts/blob/main/docs/get.ps1">get.ps1</a>,
+    <a href="https://github.com/Ewtizz/EwScripts">весь репозиторий</a>.
+  </footer>
+</main>
+</body>
+</html>
