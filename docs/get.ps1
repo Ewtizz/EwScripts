@@ -1,6 +1,6 @@
 # EwScripts - one-line installer.
 #
-#     irm https://ewtizz.github.io/EwScripts/get.ps1 | iex
+#     [Net.ServicePointManager]::SecurityProtocol=3072; irm https://ewtizz.github.io/EwScripts/get.ps1 | iex
 #
 # This file is deliberately ASCII-only. It is fetched over HTTP and executed via
 # iex, and PowerShell 5.1 infers the charset from the response headers; when a
@@ -22,6 +22,86 @@ function Invoke-EwBootstrap {
         Write-Host ''
         Write-Host "   $Message" -ForegroundColor Red
         Write-Host ''
+    }
+
+    # One request for the whole repository. Fast, and what normally happens.
+    function Get-EwFromArchive {
+        param([string]$Work)
+
+        $zip = Join-Path $Work 'repo.zip'
+        Invoke-WebRequest -Uri "https://codeload.github.com/$repo/zip/refs/heads/$branch" `
+                          -OutFile $zip -UseBasicParsing
+        Expand-Archive -LiteralPath $zip -DestinationPath $Work -Force
+        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+        $found = Get-ChildItem -LiteralPath $Work -Directory | Select-Object -First 1
+        if (-not $found) { throw 'the downloaded archive is empty' }
+        return $found.FullName
+    }
+
+    # Fallback for networks where GitHub itself is unreachable: jsDelivr is a
+    # CDN that mirrors public repositories. It serves no archives, so files come
+    # one by one - slower, but it gets through where codeload does not.
+    #
+    # Branch refs are cached by the CDN for hours, so a freshly pushed fix can
+    # lag here. That is the price of the fallback, not a reason to use it first.
+    function Get-EwFromMirror {
+        param([string]$Work)
+
+        $root = Join-Path $Work 'EwScripts'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+        $meta = Invoke-RestMethod -Uri "https://data.jsdelivr.com/v1/packages/gh/$repo@$branch" `
+                                  -UseBasicParsing
+        $paths = New-Object System.Collections.ArrayList
+        $stack = New-Object System.Collections.Stack
+        foreach ($entry in $meta.files) { [void]$stack.Push(@{ Node = $entry; Path = '' }) }
+        while ($stack.Count) {
+            $item = $stack.Pop()
+            $full = if ($item.Path) { "$($item.Path)/$($item.Node.name)" } else { $item.Node.name }
+            if ($item.Node.type -eq 'directory') {
+                foreach ($child in $item.Node.files) { [void]$stack.Push(@{ Node = $child; Path = $full }) }
+            } else {
+                [void]$paths.Add($full)
+            }
+        }
+
+        # Design documents are not needed to run anything.
+        $wanted = @($paths | Where-Object { $_ -notlike 'specs/*' })
+        if (-not $wanted.Count) { throw 'the mirror returned no files' }
+
+        # A refused file is skipped rather than fatal. jsDelivr will not serve
+        # executable types such as .bat - it does not want to be a malware CDN -
+        # and netpulse ships a start.bat that nothing here needs, because the
+        # launcher writes its own launch.cmd during install. Skipping keeps that
+        # policy from breaking the whole download, today and for whatever type
+        # they refuse next. Anything genuinely required is missed loudly later.
+        $done = 0
+        $skipped = @()
+        foreach ($relative in $wanted) {
+            $target = Join-Path $root ($relative -replace '/', '\')
+            New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+            try {
+                Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/gh/$repo@$branch/$relative" `
+                                  -OutFile $target -UseBasicParsing
+            } catch {
+                if ($_.Exception.Response.StatusCode.value__ -eq 403) {
+                    $skipped += $relative
+                    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+                } else {
+                    throw
+                }
+            }
+            $done++
+            Write-Host ("`r   mirror: $done / $($wanted.Count)   ") -NoNewline -ForegroundColor DarkGray
+        }
+        Write-Host ''
+        if ($skipped.Count) {
+            Write-Host "   mirror refused (not needed): $($skipped -join ', ')" -ForegroundColor DarkGray
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $root 'launcher\EwScripts.psm1'))) {
+            throw 'the mirror copy is missing the launcher'
+        }
+        return $root
     }
 
     if ($env:OS -ne 'Windows_NT') {
@@ -72,30 +152,30 @@ function Invoke-EwBootstrap {
     $work = Join-Path $env:TEMP ('ewscripts-' + [Guid]::NewGuid().ToString('N'))
     try {
         New-Item -ItemType Directory -Path $work -Force | Out-Null
-        $zip = Join-Path $work 'repo.zip'
-        $url = "https://codeload.github.com/$repo/zip/refs/heads/$branch"
 
         Write-Host ''
         Write-Host '   EwScripts' -ForegroundColor Cyan
         Write-Host '   downloading...' -ForegroundColor DarkGray
 
+        $source = $null
+        $firstError = ''
         try {
-            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+            $source = Get-EwFromArchive $work
         } catch {
-            Write-Problem "Cannot reach $url"
-            Write-Problem $_.Exception.Message
-            return
+            $firstError = $_.Exception.Message
+            Write-Host '   GitHub is unreachable, trying the jsDelivr mirror...' -ForegroundColor DarkGray
+            try {
+                $source = Get-EwFromMirror $work
+            } catch {
+                Write-Problem 'Cannot reach GitHub or the jsDelivr mirror.'
+                Write-Problem "GitHub: $firstError"
+                Write-Problem "Mirror: $($_.Exception.Message)"
+                return
+            }
         }
 
-        Expand-Archive -LiteralPath $zip -DestinationPath $work -Force
-        $src = Get-ChildItem -LiteralPath $work -Directory | Select-Object -First 1
-        if (-not $src) {
-            Write-Problem 'The downloaded archive looks empty.'
-            return
-        }
-
-        Import-Module (Join-Path $src.FullName 'launcher\EwScripts.psm1') -Force -DisableNameChecking
-        Show-EwMenu -SourceDir $src.FullName
+        Import-Module (Join-Path $source 'launcher\EwScripts.psm1') -Force -DisableNameChecking
+        Show-EwMenu -SourceDir $source
     }
     catch {
         Write-Problem $_.Exception.Message

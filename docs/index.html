@@ -50,12 +50,14 @@
     с сообщением «Базовое соединение закрыто».
   </p>
 
-  <h2>Если не работает</h2>
+  <h2>Если GitHub недоступен</h2>
   <p class="hint">
-    Когда в TLS вмешивается антивирус или корпоративный прокси, помогает обходной
-    путь через <code>curl.exe</code> — у него свой TLS, мимо .NET:
+    В некоторых сетях <code>github.io</code> не открывается — соединение обрывается
+    прямо на рукопожатии. Тогда ставьте с зеркала jsDelivr, оно отдаёт копии
+    публичных репозиториев GitHub. Дальше установщик справится сам: если архив не
+    скачается с GitHub, он заберёт файлы через то же зеркало.
   </p>
-  <pre>iex (curl.exe -sL https://ewtizz.github.io/EwScripts/get.ps1 | Out-String)</pre>
+  <pre>[Net.ServicePointManager]::SecurityProtocol=3072; irm https://cdn.jsdelivr.net/gh/Ewtizz/EwScripts@main/docs/get.ps1 | iex</pre>
 
   <h2>Что происходит</h2>
   <ul>
