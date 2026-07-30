@@ -41,10 +41,17 @@ function Invoke-EwBootstrap {
     } catch { }
 
     # GitHub refuses anything below TLS 1.2 and PowerShell 5.1 still negotiates
-    # lower by default. Without this the download fails on a stock Windows 10.
+    # lower by default. Without this the repo download fails on a stock machine.
+    #
+    # 3072 is TLS 1.2 written as a number on purpose: on .NET 4.0 the name
+    # [Net.SecurityProtocolType]::Tls12 does not exist at all, and merely naming
+    # it throws before any connection is attempted. The number always works.
+    #
+    # Note this does NOT help the very first request - the one that fetches this
+    # file. That is why the documented install command sets TLS 1.2 itself.
     try {
         [Net.ServicePointManager]::SecurityProtocol =
-            [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            [Net.ServicePointManager]::SecurityProtocol -bor 3072
     } catch { }
 
     # The menu itself is in Russian; on a default cp866 console it would be
