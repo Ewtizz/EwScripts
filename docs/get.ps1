@@ -134,6 +134,28 @@ function Invoke-EwBootstrap {
             [Net.ServicePointManager]::SecurityProtocol -bor 3072
     } catch { }
 
+    # ExecutionPolicy applies to script files, not to code arriving through iex -
+    # which is why this file runs fine and the launcher it unpacks does not. On a
+    # stock Windows the policy is Restricted, so without this the install fails on
+    # its very last step, on a freshly installed machine, with "running scripts is
+    # disabled on this system".
+    #
+    # Process scope covers this console window only, vanishes when it closes and
+    # needs no administrator. It also outranks the CurrentUser and LocalMachine
+    # settings, so a machine somebody has tightened by hand is handled too.
+    try {
+        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
+    } catch { }
+
+    # Only a Group Policy outranks Process scope, and lifting it takes an
+    # administrator. Better said now than after a pointless download.
+    $policy = Get-ExecutionPolicy
+    if ($policy -eq 'Restricted' -or $policy -eq 'AllSigned') {
+        Write-Problem "Group Policy blocks scripts here: ExecutionPolicy is $policy."
+        Write-Problem 'Only an administrator can lift that. Get-ExecutionPolicy -List shows where it is set.'
+        return
+    }
+
     # The menu itself is in Russian; on a default cp866 console it would be
     # unreadable without this.
     $previousEncoding = [Console]::OutputEncoding
